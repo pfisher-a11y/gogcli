@@ -1,6 +1,6 @@
 module github.com/steipete/gogcli
 
-go 1.25.0
+go 1.24.7
 
 require (
 	github.com/99designs/keyring v1.2.2
@@ -8,7 +8,7 @@ require (
 	github.com/muesli/termenv v0.16.0
 	github.com/stretchr/testify v1.11.1
 	github.com/yosuke-furukawa/json5 v0.1.1
-	golang.org/x/net v0.51.0
+	golang.org/x/net v0.40.0
 	golang.org/x/oauth2 v0.35.0
 	golang.org/x/term v0.40.0
 	golang.org/x/text v0.34.0
