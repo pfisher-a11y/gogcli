@@ -12,6 +12,96 @@ import (
 	"google.golang.org/api/sheets/v4"
 )
 
+func TestExecute_SheetsListCmd(t *testing.T) {
+	origNew := newDriveService
+	t.Cleanup(func() { newDriveService = origNew })
+
+	svc, closeSrv := newDriveTestService(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "/files") && r.Method == http.MethodGet {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"files": []map[string]any{
+					{"id": "ssid1", "name": "Budget 2024", "modifiedTime": "2024-06-01T10:00:00Z"},
+					{"id": "ssid2", "name": "Expenses", "modifiedTime": "2024-05-15T08:30:00Z"},
+				},
+				"nextPageToken": "",
+			})
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer closeSrv()
+
+	newDriveService = stubDriveService(svc)
+	t.Setenv("GOG_ACCOUNT", "a@b.com")
+
+	_ = captureStderr(t, func() {
+		// Text mode — headers and IDs must appear.
+		out := captureStdout(t, func() {
+			if err := Execute([]string{"sheets", "list"}); err != nil {
+				t.Fatalf("list: %v", err)
+			}
+		})
+		if !strings.Contains(out, "ssid1") || !strings.Contains(out, "Budget 2024") {
+			t.Fatalf("unexpected text output: %q", out)
+		}
+
+		// JSON mode — spreadsheets key must be present.
+		jsonOut := captureStdout(t, func() {
+			if err := Execute([]string{"--json", "sheets", "list"}); err != nil {
+				t.Fatalf("list json: %v", err)
+			}
+		})
+		if !strings.Contains(jsonOut, "ssid1") || !strings.Contains(jsonOut, "spreadsheets") {
+			t.Fatalf("unexpected json output: %q", jsonOut)
+		}
+
+		// --query flag is forwarded to the Drive query.
+		_ = captureStdout(t, func() {
+			if err := Execute([]string{"sheets", "list", "--query", "Budget"}); err != nil {
+				t.Fatalf("list --query: %v", err)
+			}
+		})
+
+		// ls alias.
+		_ = captureStdout(t, func() {
+			if err := Execute([]string{"sheets", "ls"}); err != nil {
+				t.Fatalf("list alias: %v", err)
+			}
+		})
+	})
+}
+
+func TestExecute_SheetsListCmd_Empty(t *testing.T) {
+	origNew := newDriveService
+	t.Cleanup(func() { newDriveService = origNew })
+
+	svc, closeSrv := newDriveTestService(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "/files") && r.Method == http.MethodGet {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{"files": []any{}})
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer closeSrv()
+
+	newDriveService = stubDriveService(svc)
+	t.Setenv("GOG_ACCOUNT", "a@b.com")
+
+	_ = captureStderr(t, func() {
+		// JSON mode with no results should still succeed.
+		out := captureStdout(t, func() {
+			if err := Execute([]string{"--json", "sheets", "list"}); err != nil {
+				t.Fatalf("list empty: %v", err)
+			}
+		})
+		if !strings.Contains(out, "spreadsheets") {
+			t.Fatalf("unexpected empty json output: %q", out)
+		}
+	})
+}
+
 func TestExecute_SheetsMoreCommands(t *testing.T) {
 	origNew := newSheetsService
 	t.Cleanup(func() { newSheetsService = origNew })

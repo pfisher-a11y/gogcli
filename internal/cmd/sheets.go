@@ -24,6 +24,7 @@ func cleanRange(r string) string {
 }
 
 type SheetsCmd struct {
+	List     SheetsListCmd     `cmd:"" name:"list" aliases:"ls" help:"List spreadsheets you have access to"`
 	Get      SheetsGetCmd      `cmd:"" name:"get" aliases:"read,show" help:"Get values from a range"`
 	Update   SheetsUpdateCmd   `cmd:"" name:"update" aliases:"edit,set" help:"Update values in a range"`
 	Append   SheetsAppendCmd   `cmd:"" name:"append" aliases:"add" help:"Append values to a range"`
@@ -36,6 +37,66 @@ type SheetsCmd struct {
 	Create   SheetsCreateCmd   `cmd:"" name:"create" aliases:"new" help:"Create a new spreadsheet"`
 	Copy     SheetsCopyCmd     `cmd:"" name:"copy" aliases:"cp,duplicate" help:"Copy a Google Sheet"`
 	Export   SheetsExportCmd   `cmd:"" name:"export" aliases:"download,dl" help:"Export a Google Sheet (pdf|xlsx|csv) via Drive"`
+}
+
+type SheetsListCmd struct {
+	Max       int64  `name:"max" aliases:"limit" help:"Max results" default:"20"`
+	Page      string `name:"page" aliases:"cursor" help:"Page token"`
+	Query     string `name:"query" help:"Filter by name (substring match)"`
+	AllDrives bool   `name:"all-drives" help:"Include shared drives (default: true; use --no-all-drives for My Drive only)" default:"true" negatable:"_"`
+}
+
+func (c *SheetsListCmd) Run(ctx context.Context, flags *RootFlags) error {
+	u := ui.FromContext(ctx)
+	account, err := requireAccount(flags)
+	if err != nil {
+		return err
+	}
+
+	svc, err := newDriveService(ctx, account)
+	if err != nil {
+		return err
+	}
+
+	q := "mimeType = '" + driveMimeGoogleSheet + "' and trashed = false"
+	if name := strings.TrimSpace(c.Query); name != "" {
+		q += " and name contains '" + escapeDriveQueryString(name) + "'"
+	}
+
+	call := svc.Files.List().
+		Q(q).
+		PageSize(c.Max).
+		PageToken(c.Page).
+		OrderBy("modifiedTime desc")
+	call = driveFilesListCallWithDriveSupport(call, c.AllDrives)
+	resp, err := call.
+		Fields("nextPageToken, files(id, name, modifiedTime, webViewLink)").
+		Context(ctx).
+		Do()
+	if err != nil {
+		return err
+	}
+
+	if outfmt.IsJSON(ctx) {
+		return outfmt.WriteJSON(ctx, os.Stdout, map[string]any{
+			"spreadsheets":  resp.Files,
+			"nextPageToken": resp.NextPageToken,
+		})
+	}
+
+	if len(resp.Files) == 0 {
+		u.Err().Println("No spreadsheets found")
+		return nil
+	}
+
+	w, flush := tableWriter(ctx)
+	defer flush()
+	fmt.Fprintln(w, "ID\tNAME\tMODIFIED")
+	for _, f := range resp.Files {
+		fmt.Fprintf(w, "%s\t%s\t%s\n", f.Id, f.Name, formatDateTime(f.ModifiedTime))
+	}
+	printNextPageHint(u, resp.NextPageToken)
+	return nil
 }
 
 type SheetsExportCmd struct {
